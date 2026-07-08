@@ -7,6 +7,8 @@ import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.appcompat.app.AppCompatActivity
 import android.view.View
+import android.util.Log
+import android.webkit.WebSettings
 
 class MainActivity : AppCompatActivity() {
 
@@ -31,7 +33,9 @@ class MainActivity : AppCompatActivity() {
             loadWithOverviewMode = true
             builtInZoomControls = false
             displayZoomControls = false
+            cacheMode = WebSettings.LOAD_DEFAULT
         }
+
 
         webView.webViewClient = WebViewClient()
         webView.webChromeClient = WebChromeClient()
