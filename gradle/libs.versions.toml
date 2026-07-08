@@ -7,7 +7,7 @@ targetSdk = "36"
 minSdk = "21"
 
 appcompat = "1.7.1"
-core = "1.19.0"
+core = "1.16.0"
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
