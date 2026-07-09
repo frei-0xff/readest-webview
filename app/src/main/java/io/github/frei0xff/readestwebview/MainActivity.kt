@@ -11,7 +11,7 @@ import org.mozilla.geckoview.GeckoView
 class MainActivity : AppCompatActivity() {
 
     companion object {
-        private const val HOME_URL = "https://example.com/"
+        private const val HOME_URL = "https://web.readest.com/"
     }
 
     private lateinit var runtime: GeckoRuntime
