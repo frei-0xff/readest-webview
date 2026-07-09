@@ -9,7 +9,7 @@ minSdk = "21"
 appcompat = "1.7.1"
 core = "1.16.0"
 
-geckoview = "140.0.1"
+geckoview = "141.0.20250806102122"
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
@@ -18,4 +18,5 @@ kotlin-android = { id = "org.jetbrains.kotlin.android", version.ref = "kotlin" }
 [libraries]
 androidx-appcompat = { module = "androidx.appcompat:appcompat", version.ref = "appcompat" }
 androidx-core = { module = "androidx.core:core-ktx", version.ref = "core" }
+
 geckoview = { module = "org.mozilla.geckoview:geckoview", version.ref = "geckoview" }
