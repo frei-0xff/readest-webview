@@ -3,12 +3,7 @@ package io.github.frei0xff.readestwebview
 import android.os.Bundle
 import android.view.View
 import androidx.appcompat.app.AppCompatActivity
-import org.mozilla.geckoview.BasicGeckoViewPrompt
-import org.mozilla.geckoview.BasicSelectionActionDelegate
-import org.mozilla.geckoview.GeckoRuntime
-import org.mozilla.geckoview.GeckoRuntimeSettings
-import org.mozilla.geckoview.GeckoSession
-import org.mozilla.geckoview.GeckoView
+import org.mozilla.geckoview.*
 
 class MainActivity : AppCompatActivity() {
 
@@ -20,11 +15,10 @@ class MainActivity : AppCompatActivity() {
     private lateinit var session: GeckoSession
     private lateinit var geckoView: GeckoView
 
-    inner class NoOpSelectionDelegate :
-        BasicSelectionActionDelegate(this@MainActivity) {
-
+    // Custom delegate that suppresses the action bar
+    inner class NoOpSelectionDelegate : BasicSelectionActionDelegate(this@MainActivity) {
         override fun isActionAvailable(action: String): Boolean {
-            // Disable Android's "Copy / Select all" floating toolbar.
+            // Return false for all actions → nothing shows up
             return false
         }
     }
@@ -40,10 +34,7 @@ class MainActivity : AppCompatActivity() {
         session = GeckoSession()
         session.open(runtime)
 
-        // Native dialogs (<select>, alert(), confirm(), prompt(), file picker...)
-        session.promptDelegate = BasicGeckoViewPrompt(this)
-
-        // Disable Android selection toolbar.
+        // Apply the custom delegate
         session.selectionActionDelegate = NoOpSelectionDelegate()
 
         geckoView = GeckoView(this)
