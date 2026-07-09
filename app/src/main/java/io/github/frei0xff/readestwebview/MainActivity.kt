@@ -1,9 +1,15 @@
 package io.github.frei0xff.readestwebview
 
 import android.os.Bundle
+import android.view.ActionMode
+import android.view.Menu
 import android.view.View
 import androidx.appcompat.app.AppCompatActivity
-import org.mozilla.geckoview.*
+import org.mozilla.geckoview.BasicSelectionActionDelegate
+import org.mozilla.geckoview.GeckoRuntime
+import org.mozilla.geckoview.GeckoRuntimeSettings
+import org.mozilla.geckoview.GeckoSession
+import org.mozilla.geckoview.GeckoView
 
 class MainActivity : AppCompatActivity() {
 
@@ -15,11 +21,24 @@ class MainActivity : AppCompatActivity() {
     private lateinit var session: GeckoSession
     private lateinit var geckoView: GeckoView
 
-    // Custom delegate that suppresses the action bar
-    inner class NoOpSelectionDelegate : BasicSelectionActionDelegate(this@MainActivity) {
-        override fun isActionAvailable(action: String): Boolean {
-            // Return false for all actions → nothing shows up
-            return false
+    /**
+     * Suppress Android's text-selection ActionMode while leaving Gecko's
+     * selection logic untouched.
+     */
+    inner class NoToolbarSelectionDelegate :
+        BasicSelectionActionDelegate(this@MainActivity) {
+
+        override fun onShowActionRequest(
+            session: GeckoSession,
+            selection: GeckoSession.SelectionActionDelegate.Selection
+        ) {
+            // Do nothing.
+            // Gecko still receives the selection event,
+            // but we never create an ActionMode.
+        }
+
+        override fun onHideAction(session: GeckoSession, reason: Int) {
+            // Do nothing.
         }
     }
 
@@ -34,14 +53,15 @@ class MainActivity : AppCompatActivity() {
         session = GeckoSession()
         session.open(runtime)
 
-        // Apply the custom delegate
-        session.selectionActionDelegate = NoOpSelectionDelegate()
+        session.selectionActionDelegate = NoToolbarSelectionDelegate()
 
         geckoView = GeckoView(this)
         geckoView.setSession(session)
+
         setContentView(geckoView)
 
         session.loadUri(HOME_URL)
+
         hideSystemUi()
     }
 
