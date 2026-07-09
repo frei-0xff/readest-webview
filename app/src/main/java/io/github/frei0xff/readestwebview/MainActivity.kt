@@ -11,7 +11,7 @@ import org.mozilla.geckoview.GeckoView
 class MainActivity : AppCompatActivity() {
 
     companion object {
-        private const val HOME_URL = "https://web.readest.com"
+        private const val HOME_URL = "https://example.com/"
     }
 
     private lateinit var runtime: GeckoRuntime
@@ -23,8 +23,7 @@ class MainActivity : AppCompatActivity() {
 
         runtime = GeckoRuntime.create(
             this,
-            GeckoRuntimeSettings.Builder()
-                .build()
+            GeckoRuntimeSettings.Builder().build()
         )
 
         session = GeckoSession()
@@ -33,8 +32,27 @@ class MainActivity : AppCompatActivity() {
         geckoView = GeckoView(this)
         geckoView.setSession(session)
 
+        setContentView(geckoView)
+
         session.loadUri(HOME_URL)
 
+        hideSystemUi()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        hideSystemUi()
+    }
+
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+
+        if (hasFocus) {
+            hideSystemUi()
+        }
+    }
+
+    private fun hideSystemUi() {
         window.decorView.systemUiVisibility =
             View.SYSTEM_UI_FLAG_LAYOUT_STABLE or
             View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION or
@@ -42,7 +60,5 @@ class MainActivity : AppCompatActivity() {
             View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or
             View.SYSTEM_UI_FLAG_FULLSCREEN or
             View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
-
-        setContentView(geckoView)
     }
 }
