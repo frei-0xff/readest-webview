@@ -3,10 +3,7 @@ package io.github.frei0xff.readestwebview
 import android.os.Bundle
 import android.view.View
 import androidx.appcompat.app.AppCompatActivity
-import org.mozilla.geckoview.GeckoRuntime
-import org.mozilla.geckoview.GeckoRuntimeSettings
-import org.mozilla.geckoview.GeckoSession
-import org.mozilla.geckoview.GeckoView
+import org.mozilla.geckoview.*
 
 class MainActivity : AppCompatActivity() {
 
@@ -17,6 +14,14 @@ class MainActivity : AppCompatActivity() {
     private lateinit var runtime: GeckoRuntime
     private lateinit var session: GeckoSession
     private lateinit var geckoView: GeckoView
+
+    // Custom delegate that suppresses the action bar
+    inner class NoOpSelectionDelegate : BasicSelectionActionDelegate(this@MainActivity) {
+        override fun isActionAvailable(action: String): Boolean {
+            // Return false for all actions → nothing shows up
+            return false
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -29,13 +34,14 @@ class MainActivity : AppCompatActivity() {
         session = GeckoSession()
         session.open(runtime)
 
+        // Apply the custom delegate
+        session.selectionActionDelegate = NoOpSelectionDelegate()
+
         geckoView = GeckoView(this)
         geckoView.setSession(session)
-
         setContentView(geckoView)
 
         session.loadUri(HOME_URL)
-
         hideSystemUi()
     }
 
@@ -46,7 +52,6 @@ class MainActivity : AppCompatActivity() {
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {
         super.onWindowFocusChanged(hasFocus)
-
         if (hasFocus) {
             hideSystemUi()
         }
