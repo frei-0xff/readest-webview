@@ -1,6 +1,7 @@
 package io.github.frei0xff.readestwebview
 
 import android.os.Bundle
+import android.view.ActionMode
 import android.view.View
 import androidx.appcompat.app.AppCompatActivity
 import org.mozilla.geckoview.GeckoRuntime
@@ -50,6 +51,17 @@ class MainActivity : AppCompatActivity() {
         if (hasFocus) {
             hideSystemUi()
         }
+    }
+
+    override fun onWindowStartingActionMode(callback: ActionMode.Callback?): ActionMode? {
+        return null
+    }
+
+    override fun onWindowStartingActionMode(
+        callback: ActionMode.Callback?,
+        type: Int
+    ): ActionMode? {
+        return null
     }
 
     private fun hideSystemUi() {
