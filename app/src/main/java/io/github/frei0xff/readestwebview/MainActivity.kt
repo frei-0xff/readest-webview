@@ -1,5 +1,6 @@
 package io.github.frei0xff.readestwebview
 
+import android.app.AlertDialog
 import android.os.Bundle
 import android.view.View
 import androidx.appcompat.app.AppCompatActivity
@@ -15,12 +16,9 @@ class MainActivity : AppCompatActivity() {
     private lateinit var session: GeckoSession
     private lateinit var geckoView: GeckoView
 
-    // Custom delegate that suppresses the action bar
+    // Selection action delegate (suppresses copy/select-all bar)
     inner class NoOpSelectionDelegate : BasicSelectionActionDelegate(this@MainActivity) {
-        override fun isActionAvailable(action: String): Boolean {
-            // Return false for all actions → nothing shows up
-            return false
-        }
+        override fun isActionAvailable(action: String): Boolean = false
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -34,8 +32,38 @@ class MainActivity : AppCompatActivity() {
         session = GeckoSession()
         session.open(runtime)
 
-        // Apply the custom delegate
+        // 1. Suppress the native selection action bar
         session.selectionActionDelegate = NoOpSelectionDelegate()
+
+        // 2. Handle prompts – only <select> dropdowns (ChoicePrompt)
+        session.promptDelegate = object : GeckoSession.PromptDelegate {
+
+            override fun onChoicePrompt(
+                session: GeckoSession,
+                prompt: GeckoSession.PromptDelegate.ChoicePrompt
+            ): GeckoResult<GeckoSession.PromptDelegate.PromptResponse>? {
+                val result = GeckoResult<GeckoSession.PromptDelegate.PromptResponse>()
+                val choices = prompt.choices
+                val items = choices.map { it.label }.toTypedArray()
+
+                AlertDialog.Builder(this@MainActivity)
+                    .setItems(items) { _, which ->
+                        // Use the choice's ID string
+                        result.complete(prompt.confirm(choices[which].id))
+                    }
+                    .setOnCancelListener {
+                        // Cancel: empty string for single, empty array for multiple
+                        if (prompt.type == GeckoSession.PromptDelegate.ChoicePrompt.Type.MULTIPLE) {
+                            result.complete(prompt.confirm(emptyArray<String>()))
+                        } else {
+                            result.complete(prompt.confirm(""))
+                        }
+                    }
+                    .show()
+
+                return result
+            }
+        }
 
         geckoView = GeckoView(this)
         geckoView.setSession(session)
