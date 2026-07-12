@@ -3,6 +3,7 @@ package io.github.frei0xff.readestwebview
 import android.app.AlertDialog
 import android.content.SharedPreferences
 import android.graphics.Rect
+import android.graphics.Color
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -86,6 +87,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         geckoView = GeckoView(this)
+        geckoView.setBackgroundColor(Color.BLACK)
         geckoView.setSession(session)
         setContentView(geckoView)
 
