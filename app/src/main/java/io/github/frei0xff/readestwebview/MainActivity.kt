@@ -204,10 +204,10 @@ class MainActivity : AppCompatActivity() {
             window.attributes = lp
 
             prefs.edit().putFloat(BRIGHTNESS_KEY, currentBrightness).apply()
-
-            val percent = Math.round(currentBrightness * 100)
-            showBrightnessToast(percent)
         }
+
+        val percent = Math.round(currentBrightness * 100)
+        showBrightnessToast(percent)
     }
 
     private fun showBrightnessToast(percent: Int) {
