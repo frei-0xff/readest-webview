@@ -32,11 +32,9 @@ class MainActivity : AppCompatActivity() {
     private var layoutCheckRunnable: Runnable? = null
 
     // ---------- Brightness control ----------
-    private var currentBrightness = 1.0f          // Will be initialized
+    private var currentBrightness = 1.0f
     private var isInForeground = false
     private var brightnessToast: Toast? = null
-
-    // SharedPreferences instance
     private lateinit var prefs: SharedPreferences
 
     // Selection action delegate (suppresses copy/select-all bar)
@@ -47,7 +45,6 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // Initialize SharedPreferences
         prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
 
         runtime = GeckoRuntime.create(
@@ -94,7 +91,7 @@ class MainActivity : AppCompatActivity() {
 
         session.loadUri(HOME_URL)
 
-        // --- Initialize brightness (respecting stored value if any) ---
+        // Initialize brightness
         initBrightness()
 
         // --- FIX: Detect keyboard hide and restore fullscreen ---
@@ -116,7 +113,7 @@ class MainActivity : AppCompatActivity() {
             handler.postDelayed(runnable, 100)
         }
 
-        hideSystemUi() // initial call
+        hideSystemUi()
     }
 
     override fun onResume() {
@@ -154,37 +151,41 @@ class MainActivity : AppCompatActivity() {
         return super.onKeyDown(keyCode, event)
     }
 
+    // ALSO CONSUME KEY UP to prevent the system beep
+    override fun onKeyUp(keyCode: Int, event: KeyEvent): Boolean {
+        if (isInForeground && (keyCode == KeyEvent.KEYCODE_VOLUME_UP || keyCode == KeyEvent.KEYCODE_VOLUME_DOWN)) {
+            return true
+        }
+        return super.onKeyUp(keyCode, event)
+    }
+
     /**
      * Initialize brightness:
-     * 1. If a stored value exists, use that.
+     * 1. If stored value exists, use that.
      * 2. Else if window has a custom brightness (≥0), use that.
      * 3. Else fall back to system brightness (0‑255 → 0.0‑1.0).
      * 4. Apply the chosen value to the window.
      */
     private fun initBrightness() {
-        // Step 1: Check for stored brightness
         val stored = prefs.getFloat(BRIGHTNESS_KEY, -1f)
         if (stored >= 0f) {
             currentBrightness = stored.coerceIn(0f, 1f)
         } else {
-            // Step 2: Check window override
             val lp = window.attributes
             currentBrightness = if (lp.screenBrightness >= 0f) {
                 lp.screenBrightness
             } else {
-                // Step 3: Use system brightness
                 try {
                     Settings.System.getInt(
                         contentResolver,
                         Settings.System.SCREEN_BRIGHTNESS
                     ) / 255f
                 } catch (_: Exception) {
-                    1f // fallback to max
+                    1f
                 }
             }
         }
 
-        // Apply to the window
         val lp = window.attributes
         lp.screenBrightness = currentBrightness
         window.attributes = lp
@@ -198,15 +199,12 @@ class MainActivity : AppCompatActivity() {
         if (newBrightness != currentBrightness) {
             currentBrightness = newBrightness
 
-            // Apply to window
             val lp = window.attributes
             lp.screenBrightness = currentBrightness
             window.attributes = lp
 
-            // Persist the value
             prefs.edit().putFloat(BRIGHTNESS_KEY, currentBrightness).apply()
 
-            // Show Toast with percentage
             val percent = Math.round(currentBrightness * 100)
             showBrightnessToast(percent)
         }
