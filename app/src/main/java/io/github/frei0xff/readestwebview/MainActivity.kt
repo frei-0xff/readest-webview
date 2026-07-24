@@ -2,7 +2,6 @@ package io.github.frei0xff.readestwebview
 
 import android.app.AlertDialog
 import android.content.SharedPreferences
-import android.content.res.Configuration
 import android.graphics.Rect
 import android.os.Bundle
 import android.os.Handler
@@ -46,8 +45,6 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        window.setBackgroundDrawableResource(android.R.color.black)
-
         prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
 
         runtime = GeckoRuntime.create(
@@ -57,8 +54,6 @@ class MainActivity : AppCompatActivity() {
 
         session = GeckoSession()
         session.open(runtime)
-
-        session.compositorController.setClearColor(android.graphics.Color.BLACK)
 
         // 1. Suppress the native selection action bar
         session.selectionActionDelegate = NoOpSelectionDelegate()
@@ -92,7 +87,6 @@ class MainActivity : AppCompatActivity() {
 
         geckoView = GeckoView(this)
         geckoView.setSession(session)
-        geckoView.setBackgroundColor(android.graphics.Color.BLACK)
         setContentView(geckoView)
 
         session.loadUri(HOME_URL)
@@ -137,25 +131,6 @@ class MainActivity : AppCompatActivity() {
         super.onWindowFocusChanged(hasFocus)
         if (hasFocus) {
             hideSystemUi()
-        }
-    }
-
-    // ---------- Handle configuration changes (rotation) ----------
-    override fun onConfigurationChanged(newConfig: Configuration) {
-        super.onConfigurationChanged(newConfig)
-
-        // Detach and reattach the session to fix viewport after rotation.
-        val currentSession = geckoView.getSession() // GeckoSession?
-        geckoView.releaseSession()
-        geckoView.requestLayout()
-
-        geckoView.post {
-            // Only reattach if the session is not null
-            if (currentSession != null) {
-                geckoView.setSession(currentSession)
-                geckoView.requestLayout()
-                geckoView.invalidate()
-            }
         }
     }
 
