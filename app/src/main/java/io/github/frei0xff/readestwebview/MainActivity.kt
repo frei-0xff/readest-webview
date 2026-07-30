@@ -7,7 +7,9 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.provider.Settings
+import android.view.GestureDetector
 import android.view.KeyEvent
+import android.view.MotionEvent
 import android.view.View
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
@@ -17,19 +19,29 @@ class MainActivity : AppCompatActivity() {
 
     companion object {
         private const val HOME_URL = "https://web.readest.com/"
-        private const val KEYBOARD_THRESHOLD = 0.15 // 15% of screen height
-        private const val BRIGHTNESS_STEP = 0.01f   // 1% per key press
+        private const val KEYBOARD_THRESHOLD = 0.15
+        private const val BRIGHTNESS_STEP = 0.01f
 
-        // SharedPreferences keys
         private const val PREFS_NAME = "readest_prefs"
         private const val BRIGHTNESS_KEY = "brightness"
     }
 
+    // ---------- Core components ----------
     private lateinit var runtime: GeckoRuntime
-    private lateinit var session: GeckoSession
     private lateinit var geckoView: GeckoView
     private val handler = Handler(Looper.getMainLooper())
     private var layoutCheckRunnable: Runnable? = null
+
+    // ---------- Tab management ----------
+    private val sessions = mutableListOf<GeckoSession>()
+    private val isHomeTab = mutableListOf<Boolean>()  // true for the original home tab
+    private var currentIndex = 0
+        set(value) {
+            if (value in 0 until sessions.size) {
+                field = value
+                geckoView.setSession(sessions[value])
+            }
+        }
 
     // ---------- Brightness control ----------
     private var currentBrightness = 1.0f
@@ -37,13 +49,45 @@ class MainActivity : AppCompatActivity() {
     private var brightnessToast: Toast? = null
     private lateinit var prefs: SharedPreferences
 
+    // ---------- Gesture detection ----------
+    private lateinit var gestureDetector: GestureDetector
+
     // Selection action delegate (suppresses copy/select-all bar)
     inner class NoOpSelectionDelegate : BasicSelectionActionDelegate(this@MainActivity) {
         override fun isActionAvailable(action: String): Boolean = false
     }
 
+    // Shared prompt delegate (for all sessions)
+    private val promptDelegate = object : GeckoSession.PromptDelegate {
+        override fun onChoicePrompt(
+            session: GeckoSession,
+            prompt: GeckoSession.PromptDelegate.ChoicePrompt
+        ): GeckoResult<GeckoSession.PromptDelegate.PromptResponse>? {
+            val result = GeckoResult<GeckoSession.PromptDelegate.PromptResponse>()
+            val choices = prompt.choices
+            val items = choices.map { it.label }.toTypedArray()
+
+            AlertDialog.Builder(this@MainActivity)
+                .setItems(items) { _, which ->
+                    result.complete(prompt.confirm(choices[which].id))
+                }
+                .setOnCancelListener {
+                    if (prompt.type == GeckoSession.PromptDelegate.ChoicePrompt.Type.MULTIPLE) {
+                        result.complete(prompt.confirm(emptyArray<String>()))
+                    } else {
+                        result.complete(prompt.confirm(""))
+                    }
+                }
+                .show()
+
+            return result
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        window.setBackgroundDrawableResource(android.R.color.black)
 
         prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
 
@@ -52,49 +96,81 @@ class MainActivity : AppCompatActivity() {
             GeckoRuntimeSettings.Builder().build()
         )
 
-        session = GeckoSession()
-        session.open(runtime)
+        // Create the initial home tab
+        val initialSession = GeckoSession()
+        initialSession.open(runtime)
+        setupSessionDelegates(initialSession)
+        sessions.add(initialSession)
+        isHomeTab.add(true)   // mark as home tab (protected)
+        currentIndex = 0
 
-        // 1. Suppress the native selection action bar
-        session.selectionActionDelegate = NoOpSelectionDelegate()
-
-        // 2. Handle <select> dropdowns
-        session.promptDelegate = object : GeckoSession.PromptDelegate {
-            override fun onChoicePrompt(
-                session: GeckoSession,
-                prompt: GeckoSession.PromptDelegate.ChoicePrompt
-            ): GeckoResult<GeckoSession.PromptDelegate.PromptResponse>? {
-                val result = GeckoResult<GeckoSession.PromptDelegate.PromptResponse>()
-                val choices = prompt.choices
-                val items = choices.map { it.label }.toTypedArray()
-
-                AlertDialog.Builder(this@MainActivity)
-                    .setItems(items) { _, which ->
-                        result.complete(prompt.confirm(choices[which].id))
-                    }
-                    .setOnCancelListener {
-                        if (prompt.type == GeckoSession.PromptDelegate.ChoicePrompt.Type.MULTIPLE) {
-                            result.complete(prompt.confirm(emptyArray<String>()))
-                        } else {
-                            result.complete(prompt.confirm(""))
-                        }
-                    }
-                    .show()
-
-                return result
-            }
-        }
-
+        // --- GeckoView setup ---
         geckoView = GeckoView(this)
-        geckoView.setSession(session)
+        geckoView.setSession(initialSession)
+        geckoView.setBackgroundColor(android.graphics.Color.BLACK)
         setContentView(geckoView)
 
-        session.loadUri(HOME_URL)
+        // --- Gesture detector ---
+        gestureDetector = GestureDetector(this, object : GestureDetector.SimpleOnGestureListener() {
+            // FIX: Use non‑nullable MotionEvent parameters to match superclass signature
+            override fun onFling(
+                e1: MotionEvent?,
+                e2: MotionEvent,
+                velocityX: Float,
+                velocityY: Float
+            ): Boolean {
+
+                if (e1 == null) return false
+
+                val diffX = e2.x - e1.x
+                val diffY = e2.y - e1.y
+
+                val minSwipeDistance = 80f
+                val minVelocity = 80f
+
+                val edgeThreshold = 50f
+                val screenWidth = geckoView.width.toFloat()
+
+                if (kotlin.math.abs(diffX) > kotlin.math.abs(diffY) &&
+                    kotlin.math.abs(diffX) > minSwipeDistance &&
+                    kotlin.math.abs(velocityX) > minVelocity) {
+
+                    if (e1.x < edgeThreshold) {
+                        switchToNextTab()
+                        return true
+                    }
+
+                    if (e1.x > screenWidth - edgeThreshold) {
+                        switchToPreviousTab()
+                        return true
+                    }
+                }
+
+                if (diffY < -minSwipeDistance &&
+                    kotlin.math.abs(velocityY) > minVelocity &&
+                    e1.y > geckoView.height - edgeThreshold) {
+
+                    closeCurrentTab()
+                    return true
+                }
+
+                return false
+            }
+        })
+
+        // Forward touch events to gesture detector
+        geckoView.setOnTouchListener { _, event ->
+            gestureDetector.onTouchEvent(event)
+            false // Return false to let GeckoView handle the event normally
+        }
+
+        // Load the home page
+        initialSession.loadUri(HOME_URL)
 
         // Initialize brightness
         initBrightness()
 
-        // --- FIX: Detect keyboard hide and restore fullscreen ---
+        // --- Keyboard hide fullscreen restore ---
         val rootView = window.decorView.rootView
         rootView.viewTreeObserver.addOnGlobalLayoutListener {
             layoutCheckRunnable?.let { handler.removeCallbacks(it) }
@@ -116,6 +192,99 @@ class MainActivity : AppCompatActivity() {
         hideSystemUi()
     }
 
+    // ---------- Setup delegates for a session ----------
+    private fun setupSessionDelegates(session: GeckoSession) {
+        // Navigation delegate to handle new windows
+        session.navigationDelegate = object : GeckoSession.NavigationDelegate {
+            override fun onLoadRequest(
+                session: GeckoSession,
+                request: GeckoSession.NavigationDelegate.LoadRequest
+            ): GeckoResult<AllowOrDeny>? {
+
+                if (request.target == GeckoSession.NavigationDelegate.TARGET_WINDOW_NEW) {
+                    createNewTab(request.uri)
+                    return GeckoResult.fromValue(AllowOrDeny.DENY)
+                }
+
+                return GeckoResult.fromValue(AllowOrDeny.ALLOW)
+            }
+
+            override fun onLoadError(
+                session: GeckoSession,
+                uri: String?,
+                error: WebRequestError
+            ): GeckoResult<String>? {
+                // Suppress error page
+                return null
+            }
+        }
+
+        // Selection delegate
+        session.selectionActionDelegate = NoOpSelectionDelegate()
+
+        // Prompt delegate (shared)
+        session.promptDelegate = promptDelegate
+    }
+
+    // ---------- Tab management ----------
+    private fun createNewTab(url: String) {
+        val newSession = GeckoSession()
+        newSession.open(runtime)
+        setupSessionDelegates(newSession)
+        sessions.add(newSession)
+        isHomeTab.add(false)
+        currentIndex = sessions.size - 1
+        newSession.loadUri(url)
+        Toast.makeText(this, "New tab opened", Toast.LENGTH_SHORT).show()
+    }
+
+    private fun switchToNextTab() {
+        if (sessions.size <= 1) {
+            Toast.makeText(this, "Only one tab", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val nextIndex = (currentIndex + 1) % sessions.size
+        if (nextIndex != currentIndex) {
+            currentIndex = nextIndex
+            Toast.makeText(this, "${currentIndex + 1}/${sessions.size}", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private fun switchToPreviousTab() {
+        if (sessions.size <= 1) {
+            Toast.makeText(this, "Only one tab", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val prevIndex = if (currentIndex - 1 < 0) sessions.size - 1 else currentIndex - 1
+        if (prevIndex != currentIndex) {
+            currentIndex = prevIndex
+            Toast.makeText(this, "${currentIndex + 1}/${sessions.size}", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private fun closeCurrentTab() {
+        if (sessions.size <= 1) {
+            Toast.makeText(this, "Cannot close the last tab", Toast.LENGTH_SHORT).show()
+            return
+        }
+        // Check if it's the home tab
+        if (isHomeTab[currentIndex]) {
+            Toast.makeText(this, "Cannot close the home tab", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val sessionToClose = sessions[currentIndex]
+        sessions.removeAt(currentIndex)
+        isHomeTab.removeAt(currentIndex)
+        sessionToClose.close()
+
+        // Adjust index if needed
+        if (currentIndex >= sessions.size) {
+            currentIndex = sessions.size - 1
+        }
+        Toast.makeText(this, "Tab closed", Toast.LENGTH_SHORT).show()
+    }
+
+    // ---------- Lifecycle ----------
     override fun onResume() {
         super.onResume()
         isInForeground = true
@@ -134,7 +303,7 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    // ---------- Intercept volume keys for brightness control ----------
+    // ---------- Volume key brightness control ----------
     override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
         if (isInForeground) {
             when (keyCode) {
@@ -151,7 +320,6 @@ class MainActivity : AppCompatActivity() {
         return super.onKeyDown(keyCode, event)
     }
 
-    // ALSO CONSUME KEY UP to prevent the system beep
     override fun onKeyUp(keyCode: Int, event: KeyEvent): Boolean {
         if (isInForeground && (keyCode == KeyEvent.KEYCODE_VOLUME_UP || keyCode == KeyEvent.KEYCODE_VOLUME_DOWN)) {
             return true
@@ -159,13 +327,7 @@ class MainActivity : AppCompatActivity() {
         return super.onKeyUp(keyCode, event)
     }
 
-    /**
-     * Initialize brightness:
-     * 1. If stored value exists, use that.
-     * 2. Else if window has a custom brightness (≥0), use that.
-     * 3. Else fall back to system brightness (0‑255 → 0.0‑1.0).
-     * 4. Apply the chosen value to the window.
-     */
+    // ---------- Brightness ----------
     private fun initBrightness() {
         val stored = prefs.getFloat(BRIGHTNESS_KEY, -1f)
         if (stored >= 0f) {
@@ -220,6 +382,7 @@ class MainActivity : AppCompatActivity() {
         brightnessToast?.show()
     }
 
+    // ---------- Fullscreen ----------
     private fun hideSystemUi() {
         window.decorView.systemUiVisibility =
             View.SYSTEM_UI_FLAG_LAYOUT_STABLE or
