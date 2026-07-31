@@ -11,8 +11,6 @@ import android.view.GestureDetector
 import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.View
-import android.view.ViewGroup
-import android.widget.FrameLayout
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import org.mozilla.geckoview.*
@@ -34,16 +32,12 @@ class MainActivity : AppCompatActivity() {
 
     // ---------- Core components ----------
     private lateinit var runtime: GeckoRuntime
+    private lateinit var geckoView: GeckoView
     private val handler = Handler(Looper.getMainLooper())
     private var layoutCheckRunnable: Runnable? = null
-    private lateinit var container: FrameLayout
 
     // ---------- Tab management ----------
-    private data class Tab(
-        val session: GeckoSession,
-        val view: GeckoView
-    )
-    private val tabs = mutableListOf<Tab>()
+    private val sessions = mutableListOf<GeckoSession>()
     private var currentIndex = 0
 
     // ---------- Brightness control ----------
@@ -86,21 +80,6 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    // ---------- Helpers ----------
-    private fun currentTab() = tabs[currentIndex]
-
-    // ---------- Create a GeckoView with gesture listener attached ----------
-    private fun createGeckoView(session: GeckoSession): GeckoView {
-        val view = GeckoView(this)
-        view.setSession(session)
-        view.setBackgroundColor(android.graphics.Color.BLACK)
-        view.setOnTouchListener { _, event ->
-            gestureDetector.onTouchEvent(event)
-            false // let the view handle the event normally
-        }
-        return view
-    }
-
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
@@ -113,7 +92,44 @@ class MainActivity : AppCompatActivity() {
             GeckoRuntimeSettings.Builder().build()
         )
 
-        // Initialize gesture detector before any views are created
+        // Create the initial home tab (index 0)
+        val initialSession = GeckoSession()
+        initialSession.open(runtime)
+        setupSessionDelegates(initialSession, isHome = true)
+        sessions.add(initialSession)
+        currentIndex = 0
+
+        geckoView = GeckoView(this)
+        geckoView.setSession(initialSession)
+        geckoView.setBackgroundColor(android.graphics.Color.BLACK)
+        setContentView(geckoView)
+
+        setupGestureDetection()
+        initialSession.loadUri(HOME_URL)
+        initBrightness()
+
+        val rootView = window.decorView.rootView
+        rootView.viewTreeObserver.addOnGlobalLayoutListener {
+            layoutCheckRunnable?.let { handler.removeCallbacks(it) }
+
+            val runnable = Runnable {
+                val rect = Rect()
+                rootView.getWindowVisibleDisplayFrame(rect)
+                val screenHeight = rootView.height
+                val keypadHeight = screenHeight - rect.bottom
+
+                if (keypadHeight < screenHeight * KEYBOARD_THRESHOLD) {
+                    hideSystemUi()
+                }
+            }
+            layoutCheckRunnable = runnable
+            handler.postDelayed(runnable, 100)
+        }
+
+        hideSystemUi()
+    }
+
+    private fun setupGestureDetection() {
         gestureDetector = GestureDetector(this, object : GestureDetector.SimpleOnGestureListener() {
             override fun onFling(
                 e1: MotionEvent?,
@@ -129,10 +145,8 @@ class MainActivity : AppCompatActivity() {
                 val minVelocity = 80f
 
                 val edgeThreshold = 50f
-                // Use dimensions from the view that received the touch
-                val view = currentTab().view
-                val screenWidth = view.width.toFloat()
-                val screenHeight = view.height.toFloat()
+                val screenWidth = geckoView.width.toFloat()
+                val screenHeight = geckoView.height.toFloat()
                 val minVerticalSwipe = screenHeight * MIN_VERTICAL_SWIPE_RATIO
 
                 // ----- New tab: swipe down from top edge (at least 30% of screen height) -----
@@ -144,6 +158,8 @@ class MainActivity : AppCompatActivity() {
                 }
 
                 // ----- Reload: left-to-right swipe in top 15% -----
+                // Conditions: start at left edge, horizontal distance > 50% screen width,
+                // horizontal dominance, start Y in top 15%
                 if (diffX > 0 &&
                     e1.x < edgeThreshold &&
                     diffX > screenWidth * 0.5f &&
@@ -181,48 +197,10 @@ class MainActivity : AppCompatActivity() {
             }
         })
 
-        // Create container and set it as content view
-        container = FrameLayout(this)
-        container.setBackgroundColor(android.graphics.Color.BLACK)
-        setContentView(container)
-
-        // Create the initial home tab (index 0)
-        val session = GeckoSession()
-        session.open(runtime)
-        setupSessionDelegates(session, isHome = true)
-
-        val view = createGeckoView(session)
-        tabs.add(Tab(session, view))
-        container.addView(view, ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
-
-        // Ensure only the first tab is visible
-        currentIndex = 0
-        tabs.forEachIndexed { index, tab ->
-            tab.view.visibility = if (index == currentIndex) View.VISIBLE else View.INVISIBLE
+        geckoView.setOnTouchListener { _, event ->
+            gestureDetector.onTouchEvent(event)
+            false
         }
-
-        session.loadUri(HOME_URL)
-        initBrightness()
-
-        val rootView = window.decorView.rootView
-        rootView.viewTreeObserver.addOnGlobalLayoutListener {
-            layoutCheckRunnable?.let { handler.removeCallbacks(it) }
-
-            val runnable = Runnable {
-                val rect = Rect()
-                rootView.getWindowVisibleDisplayFrame(rect)
-                val screenHeight = rootView.height
-                val keypadHeight = screenHeight - rect.bottom
-
-                if (keypadHeight < screenHeight * KEYBOARD_THRESHOLD) {
-                    hideSystemUi()
-                }
-            }
-            layoutCheckRunnable = runnable
-            handler.postDelayed(runnable, 100)
-        }
-
-        hideSystemUi()
     }
 
     // ---------- Setup delegates for a session ----------
@@ -235,51 +213,45 @@ class MainActivity : AppCompatActivity() {
 
     // ---------- Tab management ----------
     private fun createNewTab(url: String) {
-        val session = GeckoSession()
-        session.open(runtime)
-        setupSessionDelegates(session, isHome = false)
+        val newSession = GeckoSession()
+        newSession.open(runtime)
+        setupSessionDelegates(newSession, isHome = false)
+        sessions.add(newSession)
+        val newIndex = sessions.size - 1
 
-        val view = createGeckoView(session)
-        tabs.add(Tab(session, view))
-        container.addView(view, ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
-        view.visibility = View.INVISIBLE // initially hidden
+        newSession.loadUri(url)
 
-        session.loadUri(url)
-
-        switchToTab(tabs.lastIndex)
+        switchToTab(newIndex)
     }
 
     private fun switchToTab(index: Int) {
-        if (index !in tabs.indices) return
-
-        // Use INVISIBLE to keep the view attached and avoid layout/recreate overhead
-        tabs.forEach { it.view.visibility = View.INVISIBLE }
-        tabs[index].view.visibility = View.VISIBLE
-
+        if (index !in 0 until sessions.size) return
+        geckoView.releaseSession()
+        geckoView.setSession(sessions[index])
         currentIndex = index
         showTabCounter()
     }
 
     private fun switchToNextTab() {
-        if (tabs.size <= 1) {
+        if (sessions.size <= 1) {
             showTabCounter()
             return
         }
-        val nextIndex = (currentIndex + 1) % tabs.size
+        val nextIndex = (currentIndex + 1) % sessions.size
         switchToTab(nextIndex)
     }
 
     private fun switchToPreviousTab() {
-        if (tabs.size <= 1) {
+        if (sessions.size <= 1) {
             showTabCounter()
             return
         }
-        val prevIndex = if (currentIndex - 1 < 0) tabs.size - 1 else currentIndex - 1
+        val prevIndex = if (currentIndex - 1 < 0) sessions.size - 1 else currentIndex - 1
         switchToTab(prevIndex)
     }
 
     private fun closeCurrentTab() {
-        if (tabs.size <= 1) {
+        if (sessions.size <= 1) {
             showTabCounter()
             return
         }
@@ -287,30 +259,30 @@ class MainActivity : AppCompatActivity() {
             showTabCounter()
             return
         }
+        val sessionToClose = sessions[currentIndex]
+        sessions.removeAt(currentIndex)
+        sessionToClose.close()
 
-        val tab = tabs.removeAt(currentIndex)
-        container.removeView(tab.view)
-        tab.session.close()
-        // view.releaseSession() is not needed – the view is removed and will be garbage-collected.
-
-        if (currentIndex >= tabs.size) {
-            currentIndex = tabs.size - 1
+        if (currentIndex >= sessions.size) {
+            currentIndex = sessions.size - 1
         }
         switchToTab(currentIndex)
     }
 
-    // ---------- Reload current page ----------
+    // ---------- Reload current page (silent) ----------
     private fun reloadCurrentPage() {
-        currentTab().session.reload()
-        mainToast?.cancel()
-        mainToast = Toast.makeText(this, "⟳ Reloading...", Toast.LENGTH_SHORT)
-        mainToast?.show()
+        if (currentIndex in 0 until sessions.size) {
+            sessions[currentIndex].reload()
+            mainToast?.cancel()
+            mainToast = Toast.makeText(this, "⟳ Reloading...", Toast.LENGTH_SHORT)
+            mainToast?.show()
+        }
     }
 
     // Show current tab counter
     private fun showTabCounter() {
         mainToast?.cancel()
-        mainToast = Toast.makeText(this, "${currentIndex + 1}/${tabs.size}", Toast.LENGTH_SHORT)
+        mainToast = Toast.makeText(this, "${currentIndex + 1}/${sessions.size}", Toast.LENGTH_SHORT)
         mainToast?.show()
     }
 
