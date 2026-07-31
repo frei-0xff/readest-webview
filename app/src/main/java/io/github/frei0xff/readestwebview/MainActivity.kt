@@ -7,7 +7,9 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.provider.Settings
+import android.view.GestureDetector
 import android.view.KeyEvent
+import android.view.MotionEvent
 import android.view.View
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
@@ -17,19 +19,24 @@ class MainActivity : AppCompatActivity() {
 
     companion object {
         private const val HOME_URL = "https://web.readest.com/"
-        private const val KEYBOARD_THRESHOLD = 0.15 // 15% of screen height
-        private const val BRIGHTNESS_STEP = 0.01f   // 1% per key press
+        private const val NEW_TAB_URL = "resource://android/assets/newtab.html"
+        private const val KEYBOARD_THRESHOLD = 0.15
+        private const val BRIGHTNESS_STEP = 0.01f
+        private const val BOTTOM_SWIPE_THRESHOLD = 0.85f // bottom 15% for tab switching
 
-        // SharedPreferences keys
         private const val PREFS_NAME = "readest_prefs"
         private const val BRIGHTNESS_KEY = "brightness"
     }
 
+    // ---------- Core components ----------
     private lateinit var runtime: GeckoRuntime
-    private lateinit var session: GeckoSession
     private lateinit var geckoView: GeckoView
     private val handler = Handler(Looper.getMainLooper())
     private var layoutCheckRunnable: Runnable? = null
+
+    // ---------- Tab management ----------
+    private val sessions = mutableListOf<GeckoSession>()
+    private var currentIndex = 0
 
     // ---------- Brightness control ----------
     private var currentBrightness = 1.0f
@@ -37,13 +44,44 @@ class MainActivity : AppCompatActivity() {
     private var brightnessToast: Toast? = null
     private lateinit var prefs: SharedPreferences
 
-    // Selection action delegate (suppresses copy/select-all bar)
+    // ---------- Gesture detection ----------
+    private lateinit var gestureDetector: GestureDetector
+
+    // ---------- Delegates ----------
     inner class NoOpSelectionDelegate : BasicSelectionActionDelegate(this@MainActivity) {
         override fun isActionAvailable(action: String): Boolean = false
     }
 
+    private val promptDelegate = object : GeckoSession.PromptDelegate {
+        override fun onChoicePrompt(
+            session: GeckoSession,
+            prompt: GeckoSession.PromptDelegate.ChoicePrompt
+        ): GeckoResult<GeckoSession.PromptDelegate.PromptResponse>? {
+            val result = GeckoResult<GeckoSession.PromptDelegate.PromptResponse>()
+            val choices = prompt.choices
+            val items = choices.map { it.label }.toTypedArray()
+
+            AlertDialog.Builder(this@MainActivity)
+                .setItems(items) { _, which ->
+                    result.complete(prompt.confirm(choices[which].id))
+                }
+                .setOnCancelListener {
+                    if (prompt.type == GeckoSession.PromptDelegate.ChoicePrompt.Type.MULTIPLE) {
+                        result.complete(prompt.confirm(emptyArray<String>()))
+                    } else {
+                        result.complete(prompt.confirm(""))
+                    }
+                }
+                .show()
+
+            return result
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        window.setBackgroundDrawableResource(android.R.color.black)
 
         prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
 
@@ -52,49 +90,22 @@ class MainActivity : AppCompatActivity() {
             GeckoRuntimeSettings.Builder().build()
         )
 
-        session = GeckoSession()
-        session.open(runtime)
-
-        // 1. Suppress the native selection action bar
-        session.selectionActionDelegate = NoOpSelectionDelegate()
-
-        // 2. Handle <select> dropdowns
-        session.promptDelegate = object : GeckoSession.PromptDelegate {
-            override fun onChoicePrompt(
-                session: GeckoSession,
-                prompt: GeckoSession.PromptDelegate.ChoicePrompt
-            ): GeckoResult<GeckoSession.PromptDelegate.PromptResponse>? {
-                val result = GeckoResult<GeckoSession.PromptDelegate.PromptResponse>()
-                val choices = prompt.choices
-                val items = choices.map { it.label }.toTypedArray()
-
-                AlertDialog.Builder(this@MainActivity)
-                    .setItems(items) { _, which ->
-                        result.complete(prompt.confirm(choices[which].id))
-                    }
-                    .setOnCancelListener {
-                        if (prompt.type == GeckoSession.PromptDelegate.ChoicePrompt.Type.MULTIPLE) {
-                            result.complete(prompt.confirm(emptyArray<String>()))
-                        } else {
-                            result.complete(prompt.confirm(""))
-                        }
-                    }
-                    .show()
-
-                return result
-            }
-        }
+        // Create the initial home tab (index 0)
+        val initialSession = GeckoSession()
+        initialSession.open(runtime)
+        setupSessionDelegates(initialSession, isHome = true)
+        sessions.add(initialSession)
+        currentIndex = 0
 
         geckoView = GeckoView(this)
-        geckoView.setSession(session)
+        geckoView.setSession(initialSession)
+        geckoView.setBackgroundColor(android.graphics.Color.BLACK)
         setContentView(geckoView)
 
-        session.loadUri(HOME_URL)
-
-        // Initialize brightness
+        setupGestureDetection()
+        initialSession.loadUri(HOME_URL)
         initBrightness()
 
-        // --- FIX: Detect keyboard hide and restore fullscreen ---
         val rootView = window.decorView.rootView
         rootView.viewTreeObserver.addOnGlobalLayoutListener {
             layoutCheckRunnable?.let { handler.removeCallbacks(it) }
@@ -116,6 +127,134 @@ class MainActivity : AppCompatActivity() {
         hideSystemUi()
     }
 
+    private fun setupGestureDetection() {
+        gestureDetector = GestureDetector(this, object : GestureDetector.SimpleOnGestureListener() {
+            override fun onFling(
+                e1: MotionEvent?,
+                e2: MotionEvent,
+                velocityX: Float,
+                velocityY: Float
+            ): Boolean {
+                if (e1 == null) return false
+
+                val diffX = e2.x - e1.x
+                val diffY = e2.y - e1.y
+                val minSwipeDistance = 80f
+                val minVelocity = 80f
+
+                val edgeThreshold = 50f
+                val screenWidth = geckoView.width.toFloat()
+                val screenHeight = geckoView.height.toFloat()
+
+                // Downward swipe from top edge -> open New Tab page
+                if (diffY > minSwipeDistance && Math.abs(velocityY) > minVelocity && e1.y < edgeThreshold) {
+                    createNewTab(NEW_TAB_URL)
+                    return true
+                }
+
+                // Horizontal swipe from edges -> switch tabs (ONLY if in bottom 15% of screen)
+                if (e1.y > screenHeight * BOTTOM_SWIPE_THRESHOLD &&
+                    Math.abs(diffX) > Math.abs(diffY) &&
+                    Math.abs(diffX) > minSwipeDistance &&
+                    Math.abs(velocityX) > minVelocity) {
+                    if (e1.x < edgeThreshold) {
+                        switchToNextTab()
+                        return true
+                    }
+                    if (e1.x > screenWidth - edgeThreshold) {
+                        switchToPreviousTab()
+                        return true
+                    }
+                }
+
+                // Upward swipe from bottom edge -> close current tab
+                if (diffY < -minSwipeDistance && Math.abs(velocityY) > minVelocity && e1.y > screenHeight - edgeThreshold) {
+                    closeCurrentTab()
+                    return true
+                }
+
+                return false
+            }
+        })
+
+        geckoView.setOnTouchListener { _, event ->
+            gestureDetector.onTouchEvent(event)
+            false
+        }
+    }
+
+    // ---------- Setup delegates for a session ----------
+    private fun setupSessionDelegates(session: GeckoSession, isHome: Boolean = false) {
+        if (isHome) {
+            session.selectionActionDelegate = NoOpSelectionDelegate()
+        }
+        session.promptDelegate = promptDelegate
+    }
+
+    // ---------- Tab management ----------
+    private fun createNewTab(url: String) {
+        val newSession = GeckoSession()
+        newSession.open(runtime)
+        setupSessionDelegates(newSession, isHome = false)
+        sessions.add(newSession)
+        val newIndex = sessions.size - 1
+
+        newSession.loadUri(url)
+
+        switchToTab(newIndex)
+    }
+
+    private fun switchToTab(index: Int) {
+        if (index !in 0 until sessions.size) return
+        geckoView.releaseSession()
+        geckoView.setSession(sessions[index])
+        currentIndex = index
+        showTabCounter()
+    }
+
+    private fun switchToNextTab() {
+        if (sessions.size <= 1) {
+            showTabCounter()
+            return
+        }
+        val nextIndex = (currentIndex + 1) % sessions.size
+        switchToTab(nextIndex)
+    }
+
+    private fun switchToPreviousTab() {
+        if (sessions.size <= 1) {
+            showTabCounter()
+            return
+        }
+        val prevIndex = if (currentIndex - 1 < 0) sessions.size - 1 else currentIndex - 1
+        switchToTab(prevIndex)
+    }
+
+    private fun closeCurrentTab() {
+        if (sessions.size <= 1) {
+            showTabCounter()
+            return
+        }
+        if (currentIndex == 0) {
+            showTabCounter()
+            return
+        }
+        val sessionToClose = sessions[currentIndex]
+        sessions.removeAt(currentIndex)
+        sessionToClose.close()
+
+        if (currentIndex >= sessions.size) {
+            currentIndex = sessions.size - 1
+        }
+        switchToTab(currentIndex)
+    }
+
+    // Show current tab counter (e.g., "2/5")
+    private fun showTabCounter() {
+        Toast.makeText(this, "${currentIndex + 1}/${sessions.size}", Toast.LENGTH_SHORT).show()
+    }
+
+    // ---------- Lifecycle ----------
     override fun onResume() {
         super.onResume()
         isInForeground = true
@@ -134,7 +273,6 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    // ---------- Intercept volume keys for brightness control ----------
     override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
         if (isInForeground) {
             when (keyCode) {
@@ -151,7 +289,6 @@ class MainActivity : AppCompatActivity() {
         return super.onKeyDown(keyCode, event)
     }
 
-    // ALSO CONSUME KEY UP to prevent the system beep
     override fun onKeyUp(keyCode: Int, event: KeyEvent): Boolean {
         if (isInForeground && (keyCode == KeyEvent.KEYCODE_VOLUME_UP || keyCode == KeyEvent.KEYCODE_VOLUME_DOWN)) {
             return true
@@ -159,13 +296,6 @@ class MainActivity : AppCompatActivity() {
         return super.onKeyUp(keyCode, event)
     }
 
-    /**
-     * Initialize brightness:
-     * 1. If stored value exists, use that.
-     * 2. Else if window has a custom brightness (≥0), use that.
-     * 3. Else fall back to system brightness (0‑255 → 0.0‑1.0).
-     * 4. Apply the chosen value to the window.
-     */
     private fun initBrightness() {
         val stored = prefs.getFloat(BRIGHTNESS_KEY, -1f)
         if (stored >= 0f) {
