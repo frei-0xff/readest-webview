@@ -23,6 +23,8 @@ class MainActivity : AppCompatActivity() {
         private const val KEYBOARD_THRESHOLD = 0.15
         private const val BRIGHTNESS_STEP = 0.01f
         private const val BOTTOM_SWIPE_THRESHOLD = 0.85f // bottom 15% for tab switching
+        private const val TOP_SWIPE_THRESHOLD = 0.15f    // top 15% for reload swipe
+        private const val MIN_VERTICAL_SWIPE_RATIO = 0.3f // at least 30% of screen height
 
         private const val PREFS_NAME = "readest_prefs"
         private const val BRIGHTNESS_KEY = "brightness"
@@ -41,7 +43,7 @@ class MainActivity : AppCompatActivity() {
     // ---------- Brightness control ----------
     private var currentBrightness = 1.0f
     private var isInForeground = false
-    private var brightnessToast: Toast? = null
+    private var mainToast: Toast? = null
     private lateinit var prefs: SharedPreferences
 
     // ---------- Gesture detection ----------
@@ -145,14 +147,30 @@ class MainActivity : AppCompatActivity() {
                 val edgeThreshold = 50f
                 val screenWidth = geckoView.width.toFloat()
                 val screenHeight = geckoView.height.toFloat()
+                val minVerticalSwipe = screenHeight * MIN_VERTICAL_SWIPE_RATIO
 
-                // Downward swipe from top edge -> open New Tab page
-                if (diffY > minSwipeDistance && Math.abs(velocityY) > minVelocity && e1.y < edgeThreshold) {
+                // ----- New tab: swipe down from top edge (at least 30% of screen height) -----
+                if (diffY > minVerticalSwipe &&
+                    Math.abs(velocityY) > minVelocity &&
+                    e1.y < edgeThreshold) {
                     createNewTab(NEW_TAB_URL)
                     return true
                 }
 
-                // Horizontal swipe from edges -> switch tabs (ONLY if in bottom 15% of screen)
+                // ----- Reload: left-to-right swipe in top 15% -----
+                // Conditions: start at left edge, horizontal distance > 50% screen width,
+                // horizontal dominance, start Y in top 15%
+                if (diffX > 0 &&
+                    e1.x < edgeThreshold &&
+                    diffX > screenWidth * 0.5f &&
+                    Math.abs(diffX) > Math.abs(diffY) * 2 &&
+                    Math.abs(velocityX) > minVelocity &&
+                    e1.y < screenHeight * TOP_SWIPE_THRESHOLD) {
+                    reloadCurrentPage()
+                    return true
+                }
+
+                // ----- Switch tabs: horizontal swipe from bottom edges -----
                 if (e1.y > screenHeight * BOTTOM_SWIPE_THRESHOLD &&
                     Math.abs(diffX) > Math.abs(diffY) &&
                     Math.abs(diffX) > minSwipeDistance &&
@@ -167,8 +185,10 @@ class MainActivity : AppCompatActivity() {
                     }
                 }
 
-                // Upward swipe from bottom edge -> close current tab
-                if (diffY < -minSwipeDistance && Math.abs(velocityY) > minVelocity && e1.y > screenHeight - edgeThreshold) {
+                // ----- Close tab: upward swipe from bottom edge (at least 30% of screen height) -----
+                if (diffY < -minVerticalSwipe &&
+                    Math.abs(velocityY) > minVelocity &&
+                    e1.y > screenHeight - edgeThreshold) {
                     closeCurrentTab()
                     return true
                 }
@@ -249,9 +269,21 @@ class MainActivity : AppCompatActivity() {
         switchToTab(currentIndex)
     }
 
-    // Show current tab counter (e.g., "2/5")
+    // ---------- Reload current page (silent) ----------
+    private fun reloadCurrentPage() {
+        if (currentIndex in 0 until sessions.size) {
+            sessions[currentIndex].reload()
+            mainToast?.cancel()
+            mainToast = Toast.makeText(this, "⟳ Reloading...", Toast.LENGTH_SHORT)
+            mainToast?.show()
+        }
+    }
+
+    // Show current tab counter
     private fun showTabCounter() {
-        Toast.makeText(this, "${currentIndex + 1}/${sessions.size}", Toast.LENGTH_SHORT).show()
+        mainToast?.cancel()
+        mainToast = Toast.makeText(this, "${currentIndex + 1}/${sessions.size}", Toast.LENGTH_SHORT)
+        mainToast?.show()
     }
 
     // ---------- Lifecycle ----------
@@ -341,13 +373,13 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showBrightnessToast(percent: Int) {
-        brightnessToast?.cancel()
-        brightnessToast = Toast.makeText(
+        mainToast?.cancel()
+        mainToast = Toast.makeText(
             this,
             "$percent%",
             Toast.LENGTH_SHORT
         )
-        brightnessToast?.show()
+        mainToast?.show()
     }
 
     private fun hideSystemUi() {
