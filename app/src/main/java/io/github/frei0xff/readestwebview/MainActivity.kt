@@ -271,7 +271,12 @@ class MainActivity : AppCompatActivity() {
 
     // ---------- Reload current page (silent) ----------
     private fun reloadCurrentPage() {
-        if (currentIndex in 0 until sessions.size) {
+            if (currentIndex in 0 until sessions.size) {
+                sessions.forEach { session ->
+                if (session != sessions[currentIndex]) {
+                    session.reload()
+                }
+            }
             sessions[currentIndex].reload()
             mainToast?.cancel()
             mainToast = Toast.makeText(this, "⟳ Reloading...", Toast.LENGTH_SHORT)
