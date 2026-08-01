@@ -227,7 +227,9 @@ class MainActivity : AppCompatActivity() {
     private fun switchToTab(index: Int) {
         if (index !in 0 until sessions.size) return
         geckoView.releaseSession()
-        geckoView.setSession(sessions[index])
+        geckoView.post {
+            geckoView.setSession(sessions[index])
+        }
         currentIndex = index
         showTabCounter()
     }
