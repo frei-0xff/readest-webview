@@ -2,6 +2,7 @@ package io.github.frei0xff.readestwebview
 
 import android.app.AlertDialog
 import android.content.SharedPreferences
+import android.content.res.Configuration
 import android.graphics.Rect
 import android.os.Bundle
 import android.os.Handler
@@ -11,6 +12,7 @@ import android.view.GestureDetector
 import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.View
+import android.widget.FrameLayout
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import org.mozilla.geckoview.*
@@ -103,6 +105,7 @@ class MainActivity : AppCompatActivity() {
         geckoView.setSession(initialSession)
         geckoView.setBackgroundColor(android.graphics.Color.BLACK)
         setContentView(geckoView)
+        forceGeckoViewSize()
 
         setupGestureDetection()
         initialSession.loadUri(HOME_URL)
@@ -120,6 +123,7 @@ class MainActivity : AppCompatActivity() {
 
                 if (keypadHeight < screenHeight * KEYBOARD_THRESHOLD) {
                     hideSystemUi()
+                    forceGeckoViewSize()
                 }
             }
             layoutCheckRunnable = runnable
@@ -229,6 +233,7 @@ class MainActivity : AppCompatActivity() {
         geckoView.releaseSession()
         geckoView.post {
             geckoView.setSession(sessions[index])
+            forceGeckoViewSize()
         }
         currentIndex = index
         showTabCounter()
@@ -304,6 +309,7 @@ class MainActivity : AppCompatActivity() {
         super.onWindowFocusChanged(hasFocus)
         if (hasFocus) {
             hideSystemUi()
+            forceGeckoViewSize()
         }
     }
 
@@ -328,6 +334,14 @@ class MainActivity : AppCompatActivity() {
             return true
         }
         return super.onKeyUp(keyCode, event)
+    }
+
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        super.onConfigurationChanged(newConfig)
+
+        handler.post {
+            forceGeckoViewSize()
+        }
     }
 
     private fun initBrightness() {
@@ -392,5 +406,23 @@ class MainActivity : AppCompatActivity() {
             View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or
             View.SYSTEM_UI_FLAG_FULLSCREEN or
             View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+    }
+
+    private fun forceGeckoViewSize() {
+        val (width, height) =
+            if (resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE) {
+                1920 to 1080
+            } else {
+                1080 to 1920
+            }
+
+        geckoView.layoutParams = FrameLayout.LayoutParams(width, height)
+
+        geckoView.measure(
+            View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.EXACTLY),
+            View.MeasureSpec.makeMeasureSpec(height, View.MeasureSpec.EXACTLY)
+        )
+
+        geckoView.layout(0, 0, width, height)
     }
 }
