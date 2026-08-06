@@ -49,10 +49,17 @@ android {
     kotlin {
         jvmToolchain(17)
     }
+
+    androidResources {
+        ignoreAssetsPattern = ""
+    }
 }
 
 dependencies {
     implementation(libs.androidx.appcompat)
     implementation(libs.androidx.core)
     implementation(libs.geckoview)
+
+    implementation(libs.okhttp)
+    implementation(libs.nanohttpd)
 }

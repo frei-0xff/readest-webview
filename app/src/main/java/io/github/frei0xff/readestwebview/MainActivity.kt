@@ -15,12 +15,14 @@ import android.view.View
 import android.widget.FrameLayout
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
+import fi.iki.elonen.NanoHTTPD
+import java.io.IOException
 import org.mozilla.geckoview.*
 
 class MainActivity : AppCompatActivity() {
 
     companion object {
-        private const val HOME_URL = "https://web.readest.com/"
+        private const val HOME_URL = "http://127.0.0.1:8000/"
         private const val NEW_TAB_URL = "resource://android/assets/newtab.html"
         private const val KEYBOARD_THRESHOLD = 0.15
         private const val BRIGHTNESS_STEP = 0.01f
@@ -35,6 +37,7 @@ class MainActivity : AppCompatActivity() {
     // ---------- Core components ----------
     private lateinit var runtime: GeckoRuntime
     private lateinit var geckoView: GeckoView
+    private lateinit var localHttpServer: LocalHttpServer
     private val handler = Handler(Looper.getMainLooper())
     private var layoutCheckRunnable: Runnable? = null
 
@@ -89,6 +92,13 @@ class MainActivity : AppCompatActivity() {
 
         prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
 
+        localHttpServer = LocalHttpServer(this, 8000)
+        try {
+            localHttpServer.start(NanoHTTPD.SOCKET_READ_TIMEOUT, false)
+        } catch (e: IOException) {
+            throw RuntimeException("Unable to start local HTTP server", e)
+        }
+
         runtime = GeckoRuntime.create(
             this,
             GeckoRuntimeSettings.Builder().build()
@@ -131,6 +141,11 @@ class MainActivity : AppCompatActivity() {
         }
 
         hideSystemUi()
+    }
+
+    override fun onDestroy() {
+        localHttpServer.stop()
+        super.onDestroy()
     }
 
     private fun setupGestureDetection() {

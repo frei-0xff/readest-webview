@@ -18,6 +18,37 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Download latest Readest web build
+        env:
+          GH_TOKEN: ${{ secrets.READEST_TOKEN }}
+        run: |
+          set -e
+
+          RUN_ID=$(gh run list \
+            --repo frei-0xff/readest \
+            --workflow "Build Readest Web" \
+            --branch main \
+            --status success \
+            --limit 1 \
+            --json databaseId \
+            --jq '.[0].databaseId')
+
+          if [ -z "$RUN_ID" ]; then
+            echo "ERROR: No successful Readest web build found."
+            exit 1
+          fi
+
+          echo "Using Readest workflow run: $RUN_ID"
+
+          mkdir -p app/src/main/assets
+
+          gh run download "$RUN_ID" \
+            --repo frei-0xff/readest \
+            --name readest-web \
+            --dir /tmp/readest-web
+
+          cp -a /tmp/readest-web/. app/src/main/assets/
+
       - name: Set up Java
         uses: actions/setup-java@v4
         with:
